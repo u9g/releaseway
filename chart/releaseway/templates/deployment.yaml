@@ -1,0 +1,114 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "releaseway.fullname" . }}
+  labels:
+    {{- include "releaseway.labels" . | nindent 4 }}
+spec:
+  # Stateless: the bucket is the cache, and a download half-way through is
+  # only lost scratch space.
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "releaseway.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "releaseway.selectorLabels" . | nindent 8 }}
+      annotations:
+        {{- if not .Values.existingSecret }}
+        checksum/secret: {{ include (print $.Template.BasePath "/secret.yaml") . | sha256sum }}
+        {{- end }}
+        {{- with .Values.podAnnotations }}
+        {{- toYaml . | nindent 8 }}
+        {{- end }}
+    spec:
+      # It reaches upstream and the bucket; it has nothing to ask the cluster.
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        runAsGroup: 65532
+        fsGroup: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: releaseway
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          env:
+            - name: LISTEN_ADDR
+              value: "0.0.0.0:8080"
+            - name: RELEASEWAY_SCRATCH
+              value: /scratch
+            - name: RELEASEWAY_BUCKET_ENDPOINT
+              value: {{ .Values.bucket.endpoint | quote }}
+            - name: RELEASEWAY_BUCKET
+              value: {{ .Values.bucket.name | quote }}
+            - name: RELEASEWAY_BUCKET_REGION
+              value: {{ .Values.bucket.region | quote }}
+            {{- with .Values.hosts }}
+            - name: RELEASEWAY_HOSTS
+              value: {{ join "," . | quote }}
+            {{- end }}
+            {{- with .Values.maxBytes }}
+            - name: RELEASEWAY_MAX_BYTES
+              value: {{ . | quote }}
+            {{- end }}
+            {{- range $env, $key := dict "RELEASEWAY_ACCESS_KEY_ID" "ACCESS_KEY_ID" "RELEASEWAY_SECRET_ACCESS_KEY" "SECRET_ACCESS_KEY" "RELEASEWAY_TOKEN" "TOKEN" }}
+            - name: {{ $env }}
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "releaseway.secretName" $ }}
+                  key: {{ $key }}
+                  optional: true
+            {{- end }}
+            {{- with .Values.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 30
+            failureThreshold: 5
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: [ALL]
+          volumeMounts:
+            - name: scratch
+              mountPath: /scratch
+          {{- with .Values.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+      volumes:
+        - name: scratch
+          emptyDir:
+            sizeLimit: {{ .Values.scratch.sizeLimit }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

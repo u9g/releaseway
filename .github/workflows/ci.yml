@@ -1,0 +1,148 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+# Main's runs go one at a time, so two merges close together never pick the
+# same next version. A pull request's older run is cancelled by its newer one.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --all-targets --locked -- -D warnings
+      - run: cargo test --locked
+
+  chart:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+      - name: helm lint
+        run: |
+          helm lint chart/releaseway --strict \
+            --set bucket.endpoint=https://account.r2.cloudflarestorage.com --set bucket.name=cache \
+            --set secrets.token=token \
+            --set ingress.enabled=true --set ingress.host=cache.example.com --set ingress.tls.enabled=true
+          helm lint chart/releaseway --strict \
+            --set existingSecret=releaseway --set 'hosts={github.com,example.com}' --set maxBytes=1000
+
+  # Every merge to main is a patch release: the latest vX.Y.Z tag with Z one
+  # higher. A minor or major bump is still a tag pushed by hand, and the
+  # merges after it count on from there. A commit that already has a v tag
+  # (pushed by hand) gets no second one.
+  version:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [test, chart]
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.next.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: next
+        run: |
+          if git tag --points-at HEAD | grep -q '^v'; then
+            echo "$GITHUB_SHA is already tagged; nothing to release."
+            exit 0
+          fi
+          tags=$(git tag -l 'v*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' || true)
+          latest=$(echo "$tags" | sort -V | tail -n 1)
+          if [ -z "$latest" ]; then
+            next=v0.0.1
+          else
+            IFS=. read -r major minor patch <<< "${latest#v}"
+            next="v$major.$minor.$((patch + 1))"
+          fi
+          echo "latest $latest, next $next"
+          echo "tag=$next" >> "$GITHUB_OUTPUT"
+
+  image:
+    needs: [test, chart, version]
+    # `version` is skipped on pull requests and tags; that is no reason to
+    # skip this.
+    if: ${{ !failure() && !cancelled() }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      # The image is built on each platform itself (Dockerfile), arm64 under
+      # QEMU.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        if: github.event_name != 'pull_request'
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=ref,event=branch
+            type=ref,event=pr
+            type=sha,prefix=sha-
+            type=semver,pattern={{version}}
+            type=semver,pattern={{version}},value=${{ needs.version.outputs.tag }},enable=${{ needs.version.outputs.tag != '' }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: VERSION=${{ steps.meta.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # On a vX.Y.Z tag pushed by hand, or on a merge to main with the tag
+  # `version` picked, publish the chart to oci://ghcr.io/<owner>/charts/releaseway
+  # with its version and appVersion set from the tag. A merge's tag, and its
+  # GitHub release with notes of what went in, are made here, after its image
+  # is pushed, so a release never names an image that is not there. A tag made
+  # with this workflow's token starts no workflow, which is why this does not
+  # wait for the tag's own run.
+  chart-release:
+    needs: [image, version]
+    if: >-
+      !failure() && !cancelled() &&
+      (startsWith(github.ref, 'refs/tags/v') || needs.version.outputs.tag != '')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    env:
+      TAG: ${{ needs.version.outputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Release the merge
+        if: needs.version.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --generate-notes
+      - uses: azure/setup-helm@v4
+      - run: |
+          version="${TAG#v}"
+          helm package chart/releaseway --version "$version" --app-version "$version"
+          echo "${{ secrets.GITHUB_TOKEN }}" | helm registry login ghcr.io -u "${{ github.actor }}" --password-stdin
+          helm push "releaseway-$version.tgz" "oci://ghcr.io/${{ github.repository_owner }}/charts"

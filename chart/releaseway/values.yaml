@@ -1,0 +1,72 @@
+image:
+  repository: ghcr.io/u9g/releaseway
+  # -- Defaults to the chart's appVersion.
+  tag: ""
+  pullPolicy: IfNotPresent
+
+# -- Needed while the GHCR package is private, e.g. [{name: ghcr-pull}].
+imagePullSecrets: []
+
+# The bucket files are kept in: R2, S3, or anything that speaks S3's API.
+bucket:
+  # -- e.g. https://<account id>.r2.cloudflarestorage.com. Without it every
+  # file is a 503, and the log says so.
+  endpoint: ""
+  name: ""
+  # -- auto for R2.
+  region: auto
+
+# -- The hosts cached, each served at /<host>/<path>. Empty is GitHub's
+# download hosts: github.com, codeload.github.com,
+# objects.githubusercontent.com and release-assets.githubusercontent.com.
+hosts: []
+
+# -- The largest file fetched, in bytes. Empty is 2 GiB.
+maxBytes: ""
+
+# -- Secret values. Ignored when existingSecret is set.
+secrets:
+  accessKeyId: ""
+  secretAccessKey: ""
+  # -- What a caller must send (as a bearer token, or as the password of
+  # Basic auth, which is what ~/.netrc gives) for a file not cached yet to be
+  # fetched. Without one, only what is cached already is served.
+  token: ""
+
+# -- Use your own Secret with keys ACCESS_KEY_ID, SECRET_ACCESS_KEY and
+# TOKEN. All three are optional in the pod, so it starts before the Secret
+# is made and answers 503 until it is; restart the Deployment after making
+# or changing it, since the pod reads them as it starts.
+existingSecret: ""
+
+# -- Where a download waits between upstream and the bucket.
+scratch:
+  sizeLimit: 8Gi
+
+# -- Extra environment variables for the container.
+extraEnv: []
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  host: ""
+  tls:
+    enabled: false
+    secretName: ""
+
+resources:
+  requests:
+    cpu: 10m
+    memory: 32Mi
+  limits:
+    memory: 128Mi
+
+podAnnotations: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

@@ -1,0 +1,9 @@
+apiVersion: v2
+name: releaseway
+description: A pull-through cache of release and archive downloads (GitHub's by default) in an S3 bucket.
+type: application
+version: 0.0.0
+appVersion: "0.0.0"
+home: https://github.com/u9g/releaseway
+sources:
+  - https://github.com/u9g/releaseway

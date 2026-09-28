@@ -1,0 +1,27 @@
+[package]
+name = "releaseway"
+version = "0.0.0"
+edition = "2024"
+description = "A pull-through cache of release and archive downloads in an S3 bucket."
+repository = "https://github.com/u9g/releaseway"
+publish = false
+
+[dependencies]
+axum = "0.8.9"
+base64 = "0.23.1"
+reqwest = { version = "0.13.5", default-features = false, features = ["rustls-no-provider", "stream"] }
+rustls = { version = "0.23.45", default-features = false, features = ["ring", "std"] }
+rusty-s3 = { version = "0.10.2", default-features = false, features = ["rustcrypto"] }
+tokio = { version = "1.53.1", features = ["macros", "rt-multi-thread", "net", "fs", "io-util", "signal"] }
+tower-http = { version = "0.7.1", features = ["trace"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", features = ["json"] }
+
+[dev-dependencies]
+http-body-util = "0.1.5"
+tower = { version = "0.5.3", features = ["util"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true

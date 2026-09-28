@@ -1,0 +1,16 @@
+releaseway is deploying as {{ include "releaseway.fullname" . }}.
+
+1. Check it's up:
+     kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "releaseway.fullname" . }}
+     kubectl -n {{ .Release.Namespace }} logs deploy/{{ include "releaseway.fullname" . }}
+
+2. A file is at /<host>/<path>, e.g.
+     curl -u x:$TOKEN http://{{ include "releaseway.fullname" . }}.{{ .Release.Namespace }}:{{ .Values.service.port }}/github.com/<owner>/<repo>/archive/<tag>.tar.gz
+{{- if not .Values.bucket.endpoint }}
+
+WARNING: bucket.endpoint is empty, so every file is a 503 until it is set.
+{{- end }}
+{{- if and (not .Values.existingSecret) (not .Values.secrets.token) }}
+
+WARNING: secrets.token is empty, so nothing new is ever fetched; only what is cached already is served.
+{{- end }}
