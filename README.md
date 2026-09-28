@@ -95,5 +95,6 @@ cargo run     # with the variables above
 
 CI (`.github/workflows/ci.yml`) runs fmt, clippy and the tests, and lints
 the chart. Every merge to main is a patch release: a `vX.Y.Z` tag, the
-image for amd64 and arm64, and the chart. A minor or major version is a tag
-pushed by hand, and the merges after it count on from there.
+image, and the chart. A minor or major version is a tag
+pushed by hand, and the merges after it count on from there. The image is
+amd64 alone.

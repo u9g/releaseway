@@ -1,7 +1,7 @@
-# Built on each platform itself (QEMU for arm64 in CI), since ring's C is
-# the one part that will not cross-compile without a C toolchain for the
-# target. Rust links a musl binary statically, so it runs on distroless's
-# static base, whose CA roots are how it reaches upstream and the bucket.
+# Built on the platform it is for (amd64 in CI), since ring's C is the one
+# part that will not cross-compile without a C toolchain for the target.
+# Rust links a musl binary statically, so it runs on distroless's static
+# base, whose CA roots are how it reaches upstream and the bucket.
 FROM rust:1-alpine AS build
 RUN apk add --no-cache musl-dev
 ARG VERSION=dev
